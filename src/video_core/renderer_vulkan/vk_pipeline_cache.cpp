@@ -47,6 +47,7 @@
 #include "video_core/renderer_vulkan/fixed_pipeline_state.h"
 #include "video_core/renderer_vulkan/mesh_fallback_limits.h"
 #include "video_core/renderer_vulkan/maxwell_to_vk.h"
+#include "video_core/renderer_vulkan/pipeline_build_trace.h"
 #include "video_core/renderer_vulkan/pipeline_helper.h"
 #include "video_core/renderer_vulkan/pipeline_shader_emission.h"
 #include "video_core/renderer_vulkan/pipeline_statistics.h"
@@ -389,10 +390,11 @@ void AddRuntimeSpirvTime(size_t thread, std::chrono::steady_clock::time_point be
 vk::ShaderModule EmitShaderModule(const Device& device, const Shader::Profile& profile,
                                  const Shader::RuntimeInfo& runtime_info,
                                  Shader::IR::Program& program, Shader::Backend::Bindings& binding,
-                                 u64 shader_hash, size_t stage_index,
+                                 u64 shader_hash, size_t stage_index, u64 pipeline_hash,
                                  std::span<const u32> reference = {}) {
     const auto code =
         EmitPipelineShader(profile, runtime_info, program, binding, shader_hash, reference);
+    TracePipelineSpirv(pipeline_hash, stage_index, code);
     device.SaveShader(code);
     vk::ShaderModule module{BuildShader(device, code)};
 
@@ -2536,7 +2538,7 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         } else {
             const auto begin = std::chrono::steady_clock::now();
             modules[stage_index] = EmitShaderModule(device, profile, runtime_info, program, binding,
-                                                   key.unique_hashes[index], stage_index);
+                                                   key.unique_hashes[index], stage_index, hash);
             if (build_in_parallel) {
                 AddRuntimeSpirvTime(0, begin);
             }
@@ -2558,7 +2560,7 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
                 infos[stage] = &job->programs[stage + 1].info;
             }
         }
-        emit_stages = [this, job = std::move(job), hashes = key.unique_hashes]() mutable {
+        emit_stages = [this, job = std::move(job), hashes = key.unique_hashes, hash]() mutable {
             const auto begin = std::chrono::steady_clock::now();
             std::array<vk::ShaderModule, Maxwell::MaxShaderStage> stage_modules;
             Shader::Backend::Bindings stage_binding;
@@ -2567,7 +2569,8 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
                     stage_modules[stage] =
                         EmitShaderModule(device, profile, *job->runtime_infos[stage],
                                          job->programs[stage + 1], stage_binding,
-                                         hashes[stage + 1], stage, job->reference_spirv[stage]);
+                                         hashes[stage + 1], stage, hash,
+                                         job->reference_spirv[stage]);
                 }
             }
             auto completed_pools = std::move(job->pools);
