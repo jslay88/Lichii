@@ -1248,6 +1248,19 @@ FN_MAX_LIMIT_LIST
                properties.driver.driverID == VK_DRIVER_ID_AMD_PROPRIETARY;
     }
 
+    /// Whether the emulator keeps a VkPipelineCache file: where the driver has no disk cache of
+    /// its own, and on NVIDIA's Linux driver, whose disk cache kept none of the pipelines (615.78,
+    /// Ocarina of Time: 7,400 cached graphics pipelines took 722 s of driver time at every boot,
+    /// 65 s from the file).
+    bool KeepsPipelineCacheFile() const noexcept {
+#ifdef __linux__
+        if (properties.driver.driverID == VK_DRIVER_ID_NVIDIA_PROPRIETARY) {
+            return true;
+        }
+#endif
+        return !DriverCachesPipelines();
+    }
+
     bool IsMoltenVK() const noexcept {
         return properties.driver.driverID == VK_DRIVER_ID_MOLTENVK;
     }

@@ -50,6 +50,7 @@
 #include "video_core/renderer_vulkan/fixed_pipeline_state.h"
 #include "video_core/renderer_vulkan/mesh_fallback_limits.h"
 #include "video_core/renderer_vulkan/maxwell_to_vk.h"
+#include "video_core/renderer_vulkan/pipeline_build_trace.h"
 #include "video_core/renderer_vulkan/pipeline_eviction_policy.h"
 #include "video_core/renderer_vulkan/pipeline_helper.h"
 #include "video_core/renderer_vulkan/pipeline_shader_emission.h"
@@ -393,7 +394,7 @@ void AddRuntimeSpirvTime(size_t thread, std::chrono::steady_clock::time_point be
 std::vector<u32> EmitStageSpirv(const Device& device, const Shader::Profile& profile,
                                 const Shader::RuntimeInfo& runtime_info,
                                 Shader::IR::Program& program, Shader::Backend::Bindings& binding,
-                                u64 shader_hash, size_t stage_index,
+                                u64 shader_hash, size_t stage_index, u64 pipeline_hash,
                                 std::span<const u32> reference = {}) {
     auto code = EmitPipelineShader(profile, runtime_info, program, binding, shader_hash, reference);
     device.SaveShader(code);
@@ -417,6 +418,7 @@ std::vector<u32> EmitStageSpirv(const Device& device, const Shader::Profile& pro
                                          std::span<const u32>(code.data(), code.size()));
         }
     }
+    TracePipelineSpirv(pipeline_hash, stage_index, code);
     return code;
 }
 
@@ -522,7 +524,7 @@ PipelineCache::PipelineCache(Tegra::MaxwellDeviceMemoryManager& device_memory_,
       buffer_cache{buffer_cache_}, texture_cache{texture_cache_}, shader_notify{shader_notify_},
       use_asynchronous_shaders{Settings::values.use_asynchronous_shaders.GetValue()},
       use_vulkan_pipeline_cache{Settings::values.use_vulkan_driver_pipeline_cache.GetValue() &&
-                                !device_.DriverCachesPipelines()},
+                                device_.KeepsPipelineCacheFile()},
       serialization_thread(1, "VkPipelineSerialization", {}, Common::ThreadPlacement::Background) {
     // A sixty-fourth of the RAM (16 GB: 256 MB), about 25 KB per evicted pipeline
     const u64 ram = Common::GetMemInfo().TotalPhysicalMemory;
@@ -2612,7 +2614,7 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
             const auto begin = std::chrono::steady_clock::now();
             stage_spirv[stage_index] = EmitStageSpirv(device, profile, runtime_info, program,
                                                       binding, key.unique_hashes[index],
-                                                      stage_index);
+                                                      stage_index, hash);
             if (build_in_parallel) {
                 AddRuntimeSpirvTime(0, begin);
             }
@@ -2634,7 +2636,7 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
                 infos[stage] = &job->programs[stage + 1].info;
             }
         }
-        emit_stages = [this, job = std::move(job), hashes = key.unique_hashes]() mutable {
+        emit_stages = [this, job = std::move(job), hashes = key.unique_hashes, hash]() mutable {
             const auto begin = std::chrono::steady_clock::now();
             std::array<std::vector<u32>, Maxwell::MaxShaderStage> spirv;
             Shader::Backend::Bindings stage_binding;
@@ -2643,7 +2645,7 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
                     spirv[stage] =
                         EmitStageSpirv(device, profile, *job->runtime_infos[stage],
                                        job->programs[stage + 1], stage_binding, hashes[stage + 1],
-                                       stage, job->reference_spirv[stage]);
+                                       stage, hash, job->reference_spirv[stage]);
                 }
             }
             auto completed_pools = std::move(job->pools);
