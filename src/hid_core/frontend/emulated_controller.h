@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
@@ -500,6 +499,10 @@ private:
 
     /// Set the params for virtual pad devices
     void LoadVirtualGamepadParams();
+
+    /// Sends a vibration to the output device for the given side of the controller
+    bool SetVibration(DeviceIndex device_index, const VibrationValue& vibration,
+                      Common::Input::VibrationSide side);
 
     /**
      * @param use_temporary_value If true tmp_npad_type will be used
